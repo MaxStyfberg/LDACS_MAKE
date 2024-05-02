@@ -23,7 +23,7 @@ functions: hθ/1, hβ/1, Pas/1, hks/1, H/1, K/2, L/1, DEC/2, ENC/2, Peas/0 [priv
 // But: only once per ID
 rule Register_pk:
   [ Fr(~ltkX) ]
-  --[ OnlyOnceV($X) ]->
+  --[ OncePerID($X) ]->
   [
     !Ltk($X, ~ltkX)
     , !Pk($X, pk(~ltkX))
@@ -36,12 +36,12 @@ rule Register_pk:
 //////////////
 
 // Compromising an agent's long-term key
-rule Reveal_ltk:
-  [ !Ltk($X, ltkX) ] --[ Reveal($X) ]-> [ Out(ltkX) ]
+rule Find_ltk:
+  [ !Ltk($X, ltkX) ] --[ Find($X) ]-> [ Out(ltkX) ]
 
 // Leaking an agent's session key
 rule Leak_session: 
-   [ !Sessk(s, k) ] --[ Leaked(k) ]-> [ Out(k) ]
+   [ !Sessk(s, k) ] --[ Known(k) ]-> [ Out(k) ]
 
 
 /////////////////////
@@ -54,7 +54,7 @@ rule GS_01:
     [ 
       Fr(~AFTNA)
     ]
-    --[ CreateGSC($GS, ~AFTNA) ]->
+    --[ MakeGSC($GS, ~AFTNA) ]->
     [ 
        Out(<'M01', $GS>), // M01 = Cas, AFTNA
        S_GS_01($GS, Cas, ~AFTNA)
@@ -85,7 +85,7 @@ rule GS_1:
         In(<'M1', N1, α>),
         Fr(~N2)
     ]
-    --[ Running(GS, AS, AFTNA, β),  ]->
+    --[ Executing(GS, AS, AFTNA, β),  ]->
     [
         
         Out(<'M2', ~N2, ω, y>), 
@@ -108,11 +108,11 @@ rule GS_2:
         Fr(~N4),
         Fr(~mprng)
     ]     
-    --[ Commit(GS, AS, AFTNA, β), 
-        Knows(GS, AFTNA, Kgs, AS), 
+    --[ Finishing(GS, AS, AFTNA, β), 
+        RunSession(GS, AFTNA, Kgs, AS), 
         Secret(Kgs), 
-        Honest(GS), 
-        Honest(AS) ]->
+        True(GS), 
+        True(AS) ]->
     [ 
         
         Out(<'M4', ~N4, C, C0, C1, hks1>),
@@ -138,7 +138,7 @@ rule AS_0:
        //!Ltk($AS, ltkAS),
        //Fr(~ICAOA)
     ]
-    --[ CreateAS($AS, Tas) ]->
+    --[ MakeAS($AS, Tas) ]->
     [ 
         Out(<'M02', ~Peas, $AS>), // M02 = Ras, ICAOA
         S_AS_0($AS, θ, Tas, ICAOA, ~Peas, GS)
@@ -151,7 +151,7 @@ rule AS_1:
        S_AS_0(AS, θ, Tas, ICAOA, Peas, GS),
        Fr(~N1)  
     ]
-    --[ Authentic(AS, GS, Tas) ]->
+    --[ LinkingAS, GS, Tas) ]->
     [
       
        Out(<'M1', ~N1, α>), 
@@ -172,7 +172,7 @@ rule AS_2:
        Fr(~N3)
        
     ]
-    --[ Running($AS, GS, Tas, θ) ]-> 
+    --[ Executing($AS, GS, Tas, θ) ]-> 
     [ 
         
        Out(<'M3', ~N3, j>),
@@ -193,11 +193,11 @@ rule AS_3:
         In(<'M4', N4, C, C0, C1, hks1>),
         //!Pk(AS, pk(ltkAS))
     ]
-    --[ Commit(AS, GS, Tas, θ), 
-        Knows(AS, Tas, Kas, GS), 
+    --[ Finishing(AS, GS, Tas, θ), 
+        RunSession(AS, Tas, Kas, GS), 
         Secret(Kas), 
-        Honest(AS), 
-        Honest(GS) ]->
+        True(AS), 
+        True(GS) ]->
     [  
         S_AS_3(AS, θ, Tas, ICAOA, Peas, GS, Kas), 
         !Sessk(Tas, Kas)
@@ -205,42 +205,42 @@ rule AS_3:
 
 
 /////////////////////////////////////////////////////////////////////////////
-restriction OnlyOnceV:
-  "All #i #j x. OnlyOnceV(x)@#i & OnlyOnceV(x)@#j ==> #i = #j"
+restriction OncePerID:
+  "All #i #j x. OncePerID(x)@#i & OncePerID(x)@#j ==> #i = #j"
 
 
 // verify that the protocol runs through
 lemma executable:
      exists-trace
     "Ex A B ia ib x y #i #j #k #l #m #n #o. 
-        CreateAS(A, ia)@i & CreateGSC(B, ib)@j & Authentic(A, B, ia)@k
-            & Running(A, B, ia, x)@l & Running(B, A, ib, y)@m 
-            & Commit(A, B, ia, x)@n & Commit(B, A, ib, y)@o" // nått knas här med variablerna i commit och running
+        MakeAS(A, ia)@i & MakeGSC(B, ib)@j & Linking(A, B, ia)@k
+            & Executing(A, B, ia, x)@l & Executing(B, A, ib, y)@m 
+            & Finishing(A, B, ia, x)@n & Finishing(B, A, ib, y)@o" // nått knas här med variablerna i Finishing och Executing
 
 
 lemma secure_key_establishment:
-    "All A B ia x #i. Commit(A, B, ia, x)@i ==> 
-            ( Ex P ib #j #k. Knows(A, ia, P, B)@j & Knows(B, ib, P, A)@k
-              & not (Ex D E id #l. Knows(D, id, P, E)@l & not(#j=#l) & not(#k=#l))
+    "All A B ia x #i. Finishing(A, B, ia, x)@i ==> 
+            ( Ex P ib #j #k. RunSession(A, ia, P, B)@j & RunSession(B, ib, P, A)@k
+              & not (Ex D E id #l. RunSession(D, id, P, E)@l & not(#j=#l) & not(#k=#l))
             )
-            | (Ex C #r. Reveal(C)@r & Honest(C)@i & #r<#i)" 
+            | (Ex C #r. Find(C)@r & True(C)@i & #r<#i)" 
              
 
 lemma secrecy:
     "All x #i. 
         Secret(x)@i ==> 
             not (Ex #j. K(x)@j)
-            | (Ex #u. Leaked(x)@u)
-            | (Ex B #r. Reveal(B)@r & Honest(B)@i & #r<#i)"
+            | (Ex #u. Known(x)@u)
+            | (Ex B #r. Find(B)@r & True(B)@i & #r<#i)"
 
 
 lemma mutual_authentication:
-    "All A B x y ia #i. Commit(A, B, ia, <x, y>)@i ==> 
-            ( Ex ib #j. Running(B, A, ib, y)@j
+    "All A B x y ia #i. Finishing(A, B, ia, <x, y>)@i ==> 
+            ( Ex ib #j. Executing(B, A, ib, y)@j
               & j<i
-              & not (Ex A2 B2 ia2 #i2. Commit(A2, B2, ia2, <x, y>)@i2 & not(#i2=#i))
+              & not (Ex A2 B2 ia2 #i2. Finishing(A2, B2, ia2, <x, y>)@i2 & not(#i2=#i))
             )
-            | (Ex C #r. Reveal(C)@r & Honest(C)@i & #r<#i)"
+            | (Ex C #r. Find(C)@r & True(C)@i & #r<#i)"
 
 
 end
