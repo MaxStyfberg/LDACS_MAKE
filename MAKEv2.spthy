@@ -23,7 +23,7 @@ functions: hθ/1, hβ/1, Pas/1, hks/1, H/1, K/2, L/1, DEC/2, ENC/2, Peas/0 [priv
 // But: only once per ID
 rule Register_pk:
   [ Fr(~ltkX) ]
-  --[ OncePerID($X) ]->
+  --[ OnlyOnceV($X) ]->
   [
     !Ltk($X, ~ltkX)
     , !Pk($X, pk(~ltkX))
@@ -205,8 +205,8 @@ rule AS_3:
 
 
 /////////////////////////////////////////////////////////////////////////////
-restriction OncePerID:
-  "All #i #j x. OncePerID(x)@#i & OncePerID(x)@#j ==> #i = #j"
+restriction OnlyOnceV:
+  "All #i #j x. OnlyOnceV(x)@#i & OnlyOnceV(x)@#j ==> #i = #j"
 
 
 // verify that the protocol runs through
