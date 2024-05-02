@@ -1,0 +1,282 @@
+///////////////////////////////////////////////////////
+//
+//  LDACS MAKE Protocol Model
+//
+//
+//  (c)DoubleBild - TBA. 2020
+//  DoubleBild - TBA
+//
+///////////////////////////////////////////////////////
+
+theory MAKEv1
+begin
+
+builtins: hashing, xor, diffie-hellman, symmetric-encryption, signing
+ 
+functions: hMac/1, Pas/1, hks/1, H/1, K/1, L/1, DEC/1, ENC/1, kdf/1
+
+/////////////////////////////////////
+// Public key infrastructure (PKI)
+////////////////////////////////////
+
+// Anyone can register at any time a public key together with its ID
+// But: only once per ID
+rule Register_pk:
+  [ Fr(~ltkX) ]
+  --[ OnlyOnceV($X) ]->
+  [
+    !Ltk($X, ~ltkX)
+    , !Pk($X, pk(~ltkX))
+    , Out(pk(~ltkX)) 
+  ] 
+
+/////////////////////////////////////
+// Secure Channel Rules
+////////////////////////////////////
+rule ChanOut_S:
+    [ Out_S($A,$B,x) ]
+    --[ ChanOut_S($A,$B,x) ]->
+    [ !Sec($A,$B,x) ]
+
+rule ChanIn_S:
+    [ !Sec($A,$B,x) ]
+    --[ ChanIn_S($A,$B,x) ]->
+    [ In_S($A,$B,x) ]
+
+
+/////////////////////////////////////
+// Attacker
+//////////////
+
+// Compromising an agent's long-term key
+rule Reveal_ltk:
+  [ !Ltk($X, ltkX) ] --[ Reveal($X) ]-> [ Out(ltkX) ]
+
+// Leaking an agent's session key
+rule Leak_session: 
+   [ !Sessk(s, k) ] --[ Leaked(k) ]-> [ Out(k) ]
+
+
+/////////////////////
+// GS
+////////////  
+
+rule GS_01:
+    [ 
+      Fr(~id),
+      !Ltk($GS, ltkGS)
+    ]
+    --[ CreateGSC($GS, ~id) ]->
+    [ 
+       Out(<'M01', $GS>),
+       S_GS_01($GS, ~id, ltkGS)
+    ]
+
+rule GS_02:
+    [   
+        S_GS_01(GS, id, ltkGS),
+        In(<'M02', AS>),
+        Fr(~Cas),
+        Fr(~AFNTA)
+    ]     
+    --[ Send(GS, <~Cas, ~AFNTA>), Secret_I(<~Cas, ~AFNTA>)]->
+    [ 
+        Out_S(GS, AS, <~Cas, ~AFNTA>),
+        S_GS_02(GS, id, ltkGS, AS, ~Cas, ~AFNTA)
+    ]
+
+rule GS_03:
+    let tas = h(<ICAOA, Ras>)
+        
+    in
+    [   
+        S_GS_02(GS, id, ltkGS, AS, Cas, AFNTA),
+        In_S(AS, GS, <ICAOA, Ras, pkAS>),
+    ]     
+    --[ Secret_R(<ICAOA, Ras, pkAS>), 
+        Authentic(AS, <ICAOA, Ras, pkAS>)]->
+    [ 
+        S_GS_03(GS, id, ltkGS, AS, Cas, AFNTA, ICAOA, Ras, pkAS)
+    ]
+
+rule GS_1:
+    let β = h(Ras)
+        α1 = hMac(<N1, tas>)
+        ω = Cas ⊕ β
+        y = hMac(<~N2, ω>)
+    in
+    [
+        S_GS_03(GS, id, ltkGS, AS, Cas, AFNTA, ICAOA, Ras, pkAS),
+        In(<N1, α>),
+        Fr(~N2)
+    ]
+    --[ Running(GS, AS, id, β) ]->
+    [
+        Out(<'M2', GS, ~N2, ω, y>), 
+        S_GS_1(GS, id, ltkGS, AS, Cas, AFNTA, ICAOA, Ras, pkAS, β)
+    ]
+
+rule GS_2:
+    let j1 = hMac(<N3, Cas, Ras>)
+        e1 = H(~mprng)
+        e0 = H(~mprng)
+        C0 = ENC(<pkAS, e0, e1>)
+        C1 = ~mprng ⊕ L(<e0, e1>)
+        C = <C0, C1>
+        Kgs = K(~mprng, C0,C1)
+        hks1 = hks(<~N4, C, β>)
+    in
+    [   
+        S_GS_1(GS, id, ltkGS, AS, Cas, AFNTA, ICAOA, Ras, pkAS, β),
+        In(<N3, j>),
+        Fr(~N4),
+        Fr(~mprng)
+        
+    ]     
+    --[ Commit(GS, AS, id, β), 
+        Knows(GS, id, Kgs, AS), 
+        Secret(Kgs), 
+        Honest(GS), 
+        Honest(AS) ]->
+    [ 
+        
+        Out(<'M4', ~N4, C1, C0, hks1, GS>),
+        S_GS_2(GS, id, ltkGS, AS, Cas, AFNTA, ICAOA, Ras, pkAS, β, Kgs),
+        !Sessk(id,Kgs)
+    ]
+
+
+////////////////////
+// AS
+////////////
+
+rule AS_01:
+    [ 
+        In(<'M01', GS>),
+        Fr(~id),
+        !Ltk($AS, ltkAS),
+        !Pk($AS, pkAS)
+    ]
+    --[ CreateAS($AS, ~id) ]->
+    [ 
+        Out(<'M02', $AS>),
+        S_AS_01($AS, ~id, GS, ltkAS, pkAS)
+    ]
+  
+rule AS_02: 
+    let Ras = Pas(Cas)
+        tas = h(<~ICAOA, Ras>)
+        θ = h(Ras)
+    in
+    [  
+        S_AS_01(AS, id, GS, ltkAS, pkAS),
+        In_S(GS, AS, <Cas, AFNTA>),
+        Fr(~ICAOA)
+    ]
+    --[ 
+        Secret_R(<Cas, AFNTA>), 
+        Authentic(GS, <Cas, AFNTA>), 
+        Send(AS, <~ICAOA, Ras, pkAS>),
+        Secret_I(<~ICAOA, Ras, pkAS>)
+        ]->
+    [  
+        Out_S(AS, GS, <~ICAOA, Ras, pkAS>),
+        S_AS_02(AS, id, GS, ltkAS, pkAS, tas, θ, ~ICAOA, AFNTA)
+    ]
+
+rule AS_1:
+    let α = hMac(<~N1, tas>)
+    in
+    [    
+       S_AS_02(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA),
+       Fr(~N1)  
+    ]
+    --[ Attaching(AS, GS, id) ]->
+    [
+      
+       Out(<'M1', ~N1, tas, α, AS>), 
+       S_AS_1(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA)
+    ]
+
+rule AS_2:
+    let y1 = hMac(<~N3, ω>)
+        Cas = ω ⊕ θ 
+        Ras = Pas(Cas)
+        β1 = h(Ras)
+        β = Cas ⊕ ω
+        j = hMac(<~N3, Cas, Ras>) 
+    in
+    [   
+       S_AS_1(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA), 
+       In(<'M2', N2, ω, y>), 
+       Fr(~N3)
+       
+    ]
+    --[ Running(AS, GS, id, θ) ]-> 
+    [ 
+      Out(<'M3', ~N3, j, AS>),
+      S_AS_2(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA)
+    ]
+
+rule AS_3:
+    let C = <C1, C0> 
+        e01 = DEC(<C0,ltkAS>)
+        e11 = DEC(<C0,ltkAS>)
+        mprng1 = C1 ⊕ L(<e01, e11>)
+        e2 = H(mprng1)
+        Kas = K(<mprng1, C1,C0>)
+        hks2 = hks(<N4, C, θ>)
+    in  
+    [  
+        S_AS_2(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA),
+        In(<'M4', N4, C1, C0, hks1>),
+    ]
+    --[ Commit(AS, GS, id, θ), 
+        Knows(AS, id, Kas, GS), 
+        Secret(Kas), 
+        Honest(AS), 
+        Honest(GS) ]->
+    [  
+        S_AS_3(AS, id, GS, ltkAS, pkAS, tas, θ, ICAOA, AFNTA, Kas), 
+        !Sessk(tas,Kas)
+    ]
+
+
+/////////////////////////////////////////////////////////////////////////////
+restriction OnlyOnceV:
+  "All #i #j x. OnlyOnceV(x)@#i & OnlyOnceV(x)@#j ==> #i = #j"
+
+
+// verify that the protocol runs through
+lemma executable:
+     exists-trace
+    "Ex A B ia ib x y #i #j #k #l #m #n #o. 
+        CreateAS(A, ia)@i & CreateGSC(B, ib)@j & Attaching(A, B, ia)@k
+            & Running(A, B, ia, x)@l & Running(B, A, ib, y)@m 
+            & Commit(B, A, ib, x)@n & Commit(A, B, ia, y)@o"
+
+
+lemma secure_key_establishment:
+    "All A B ia x #i. Commit(A, B, ia, x)@i ==> 
+            ( Ex P ib #j #m. Knows(A, ia, P, B)@m & Knows(B, ib, P, A)@j
+              & not (Ex D E id #k. Knows(D, id, P, E)@k & not(#m=#k) & not(#j=#k))
+            )
+            | (Ex C #r. Reveal(C)@r & Honest(C)@i & #r<#i)" 
+             
+lemma secrecy:
+    "All x #i. 
+        Secret(x)@i ==> 
+            not (Ex #j. K(x)@j)
+            | (Ex #u. Leaked(x)@u)
+            | (Ex B #r. Reveal(B)@r & Honest(B)@i & #r<#i)"
+
+lemma mutual_authentication:
+    "All A B x y ia #i. Commit(A, B, ia, <x, y>)@i ==> 
+            ( Ex ib #j. Running(B, A, ib, y)@j
+              & j<i
+              & not (Ex A2 B2 ia2 #i2. Commit(A2, B2, ia2, <x, y>)@i2 & not(#i2=#i))
+            )
+            | (Ex C #r. Reveal(C)@r & Honest(C)@i & #r<#i)"
+
+
+end
