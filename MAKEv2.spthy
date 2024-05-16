@@ -147,7 +147,7 @@ rule AS_1:
        S_AS_0(AS, θ, Tas, ICAOA, Peas, GS),
        Fr(~N1)  
     ]
-    --[ LinkingAS, GS, Tas) ]->
+    --[ Linking(AS, GS, Tas) ]->
     [
       
        Out(<'M1', ~N1, α>), 
